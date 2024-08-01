@@ -1,27 +1,201 @@
 # NgZustand
 
-This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 17.3.8.
+The [Zustand](https://github.com/pmndrs/zustand) adapter for angular. Based on https://github.com/JoaoPauloLousada/ngx-zustand adding new method and add support to some elements. 
 
-## Development server
+Thx to @JoaoPauloLousada to start the project.
 
-Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
+## Installation
 
-## Code scaffolding
+with npm:
 
-Run `ng generate component component-name` to generate a new component. You can also use `ng generate directive|pipe|service|class|guard|interface|enum|module`.
+```sh
+npm install ng-zustand zustand
+```
 
-## Build
+with yarn:
 
-Run `ng build` to build the project. The build artifacts will be stored in the `dist/` directory.
+```sh
+yarn add ng-zustand zustand
+```
 
-## Running unit tests
+## First create a store
 
-Run `ng test` to execute the unit tests via [Karma](https://karma-runner.github.io).
+Create a service that extends ZustandBaseService.
 
-## Running end-to-end tests
+```ts
+interface CounterState {
+  counter: number;
+  increment: () => void;
+  decrement: () => void;
+}
 
-Run `ng e2e` to execute the end-to-end tests via a platform of your choice. To use this command, you need to first add a package that implements end-to-end testing capabilities.
+@Injectable({
+  providedIn: 'root',
+})
+export class CounterService extends ZustandBaseService<CounterState> {
+  initStore() {
+    return (set) => ({
+      counter: 0,
+      increment: () => set((state) => ({ counter: state.counter + 1 })),
+      decrement: () => set((state) => ({ counter: state.counter - 1 })),
+    });
+  }
+}
+```
 
-## Further help
+## Use the service in your components
 
-To get more help on the Angular CLI use `ng help` or go check out the [Angular CLI Overview and Command Reference](https://angular.io/cli) page.
+```ts
+@Component({
+  selector: 'app-counter-page',
+  standalone: true,
+  imports: [CommonModule],
+  template: `
+    <div *ngIf="store$ | async as store">
+      <div>
+        count: {{ store.counter }}
+        <div>
+          <div><button (click)="store.increment()">+</button></div>
+          <div><button (click)="store.decrement()">-</button></div>
+        </div>
+      </div>
+    </div>
+  `,
+  styles: [],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class CounterPageComponent {
+  private counterService = inject(CounterService);
+  store$ = this.counterService.useStore();
+}
+```
+
+## Recipes
+
+### Fetching Everything
+
+```ts
+store$ = this.store.useStore();
+```
+
+### Selecting multiple state slices
+
+```ts
+foo$ = this.store.useStore((state) => state.foo);
+bar$ = this.store.useStore((state) => state.bar);
+fooAndBar$ = this.store.useStore((state) => ({
+  foo: state.foo,
+  bar: state.bar,
+}));
+```
+
+### Async actions
+
+Just call set when you're ready, zustand doesn't care if your actions are async or not.
+
+```ts
+export class TodosStore extends ZustandBaseService<TodosState> {
+  initStore() {
+    return (set) => ({
+      todos: [],
+      loadTodos: () => {
+        this.http.get<Todo[]>().subscribe((todos) => set({ todos }));
+      },
+    });
+  }
+}
+```
+
+### Read from state in actions
+
+set allows fn-updates set(state => result), but you still have access to state outside of it through get.
+
+```ts
+export class TodosStore extends ZustandBaseService<TodosState> {
+  initStore() {
+    return (set, get) => ({
+      todos: [],
+      action: () => {
+        const todos = get().todos;
+      },
+    });
+  }
+}
+```
+
+## Redux devtools middleware
+
+You can override **_createStore_** function in order to include the middlewares you need.
+
+```ts
+import { devtools } from 'zustand/middleware';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class CounterService extends ZustandBaseService<CounterState> {
+  initStore() {
+    return devtools<CounterState>((set) => ({
+      counter: 0,
+      increment: () => set((state) => ({ counter: state.counter + 1 })),
+      decrement: () => set((state) => ({ counter: state.counter - 1 })),
+    }));
+  }
+}
+```
+
+## Persist middleware
+
+```ts
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class CounterService extends ZustandBaseService<CounterState> {
+  initStore(): StateCreator<CounterState> {
+    return (set) => ({
+      counter: 0,
+      increment: () => set((state) => ({ counter: state.counter + 1 })),
+      decrement: () => set((state) => ({ counter: state.counter - 1 })),
+    });
+  }
+
+  override createStore() {
+    return createStore(
+      persist<CounterState>(this.initStore(), {
+        name: 'counterStore',
+        storage: createJSONStorage(() => sessionStorage),
+      })
+    );
+  }
+}
+```
+
+## Middleware
+
+You can functionally compose your store any way you like. Please check [typescript guide](https://github.com/pmndrs/zustand/blob/main/docs/guides/typescript.md) to a better explanation of how to type middlewares.
+
+```ts
+// Log every time state is changed
+const logMiddleware = (config) => (set, get, api) =>
+  config(
+    (...args) => {
+      console.log('  applying', args);
+      set(...args);
+      console.log('  new state', get());
+    },
+    get,
+    api
+  );
+
+export class CounterService extends ZustandBaseService<CounterState> {
+  initStore() {
+    return logMiddleware((set) => ({
+      counter: 0,
+      increment: () => set((state) => ({ counter: state.counter + 1 })),
+      decrement: () => set((state) => ({ counter: state.counter - 1 })),
+    }));
+  }
+}
+```
